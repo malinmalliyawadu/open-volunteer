@@ -1,0 +1,161 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Multi-tenant organization
+model Tenant {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Branding
+  logo         String?
+  primaryColor String  @default("#3b82f6")
+  accentColor  String  @default("#10b981")
+
+  // Custom terminology (JSON: { volunteer: "helper", opportunity: "service" })
+  terminology Json @default("{}")
+
+  // Feature flags (JSON: { hoursTracking: true, messaging: false })
+  features Json @default("{}")
+
+  members       TenantMember[]
+  opportunities Opportunity[]
+}
+
+// User profile (linked to Clerk)
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique
+  email     String   @unique
+  name      String?
+  avatarUrl String?
+  bio       String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Skills as JSON array: ["cooking", "driving", "first-aid"]
+  skills Json @default("[]")
+
+  // Availability as JSON: { monday: ["morning", "evening"], tuesday: [] }
+  availability Json @default("{}")
+
+  memberships TenantMember[]
+  signups     OpportunitySignup[]
+}
+
+enum MemberRole {
+  ADMIN
+  COORDINATOR
+  VOLUNTEER
+}
+
+enum MemberStatus {
+  PENDING
+  ACTIVE
+  INACTIVE
+}
+
+// Join table: User belongs to Tenant with a role
+model TenantMember {
+  id        String       @id @default(cuid())
+  tenantId  String
+  userId    String
+  role      MemberRole   @default(VOLUNTEER)
+  status    MemberStatus @default(PENDING)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@index([tenantId])
+  @@index([userId])
+}
+
+enum OpportunityType {
+  EVENT
+  SHIFT
+  PROJECT
+}
+
+enum OpportunityStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+  COMPLETED
+}
+
+model Opportunity {
+  id          String            @id @default(cuid())
+  tenantId    String
+  title       String
+  description String
+  type        OpportunityType   @default(EVENT)
+  status      OpportunityStatus @default(DRAFT)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  // Location
+  location  String?
+  address   String?
+  isVirtual Boolean @default(false)
+
+  // Schedule
+  startDate  DateTime
+  endDate    DateTime?
+  recurrence String?  // e.g., "weekly", "monthly", or null for one-time
+
+  // Requirements (JSON: { skills: ["driving"], minAge: 18, backgroundCheck: false })
+  requirements Json @default("{}")
+
+  // Capacity
+  capacity       Int  @default(0) // 0 = unlimited
+  spotsRemaining Int  @default(0)
+
+  // Tags for filtering
+  tags Json @default("[]")
+
+  tenant  Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  signups OpportunitySignup[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([startDate])
+}
+
+enum SignupStatus {
+  APPLIED
+  APPROVED
+  WAITLISTED
+  DECLINED
+  COMPLETED
+  CANCELLED
+}
+
+model OpportunitySignup {
+  id            String       @id @default(cuid())
+  opportunityId String
+  userId        String
+  status        SignupStatus @default(APPLIED)
+  appliedAt     DateTime     @default(now())
+  approvedAt    DateTime?
+  completedAt   DateTime?
+  notes         String?
+
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([opportunityId, userId])
+  @@index([opportunityId])
+  @@index([userId])
+  @@index([opportunityId, status])
+}
