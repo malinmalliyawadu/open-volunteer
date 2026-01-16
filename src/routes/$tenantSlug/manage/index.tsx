@@ -1,51 +1,68 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { orpc } from "@/orpc/client";
 import { useTenant } from "@/lib/tenant-context";
+import { prisma } from "@/db";
 import { Users, Calendar, ClipboardList, Settings } from "lucide-react";
 
 export const Route = createFileRoute("/$tenantSlug/manage/")({
 	component: ManageDashboard,
+	loader: async ({ params }) => {
+		const tenant = await prisma.tenant.findUnique({
+			where: { slug: params.tenantSlug },
+		});
+
+		if (!tenant) {
+			return {
+				opportunities: [],
+				membersTotal: 0,
+				pendingApplicationsCount: 0,
+			};
+		}
+
+		const [opportunities, membersTotal, pendingApplications] = await Promise.all([
+			prisma.opportunity.findMany({
+				where: { tenantId: tenant.id },
+				orderBy: { createdAt: "desc" },
+				take: 100,
+				include: {
+					_count: {
+						select: {
+							signups: {
+								where: {
+									status: { in: ["APPLIED", "APPROVED"] },
+								},
+							},
+						},
+					},
+				},
+			}),
+			prisma.tenantMember.count({
+				where: {
+					tenantId: tenant.id,
+					status: "ACTIVE",
+				},
+			}),
+			prisma.opportunitySignup.count({
+				where: {
+					status: "APPLIED",
+					opportunity: {
+						tenantId: tenant.id,
+					},
+				},
+			}),
+		]);
+
+		return {
+			opportunities,
+			membersTotal,
+			pendingApplicationsCount: pendingApplications,
+		};
+	},
 });
 
 function ManageDashboard() {
 	const { tenant, t, isCoordinator, isAdmin } = useTenant();
-
-	// Get stats
-	const { data: opportunitiesData } = useQuery(
-		orpc.listOpportunities.queryOptions({
-			input: {
-				tenantId: tenant.id,
-				limit: 100,
-			},
-		}),
-	);
-
-	const { data: membersData } = useQuery(
-		orpc.listMembers.queryOptions({
-			input: {
-				tenantId: tenant.id,
-				status: "ACTIVE",
-				limit: 100,
-			},
-		}),
-	);
-
-	// Get pending applications
-	const { data: applicationsData } = useQuery(
-		orpc.listSignups.queryOptions({
-			input: {
-				status: "APPLIED",
-				limit: 100,
-			},
-		}),
-	);
-
-	// Filter applications for this tenant's opportunities
-	const pendingApplications =
-		applicationsData?.signups.filter(
-			(s) => s.opportunity?.tenantId === tenant.id,
-		) ?? [];
+	const { opportunities, membersTotal, pendingApplicationsCount } =
+		Route.useLoaderData();
 
 	if (!isCoordinator) {
 		return (
@@ -60,27 +77,29 @@ function ManageDashboard() {
 		);
 	}
 
+	const activeOpportunities = opportunities.filter(
+		(o) => o.status === "PUBLISHED",
+	).length;
+
 	const stats = [
 		{
 			label: `Active ${t("opportunities")}`,
-			value:
-				opportunitiesData?.opportunities.filter((o) => o.status === "PUBLISHED")
-					.length ?? 0,
+			value: activeOpportunities,
 			icon: <Calendar className="w-8 h-8" />,
 			href: `/${tenant.slug}/opportunities`,
 		},
 		{
 			label: `Total ${t("volunteers")}`,
-			value: membersData?.total ?? 0,
+			value: membersTotal,
 			icon: <Users className="w-8 h-8" />,
 			href: `/${tenant.slug}/manage/members`,
 		},
 		{
 			label: "Pending Applications",
-			value: pendingApplications.length,
+			value: pendingApplicationsCount,
 			icon: <ClipboardList className="w-8 h-8" />,
 			href: `/${tenant.slug}/manage/applications`,
-			highlight: pendingApplications.length > 0,
+			highlight: pendingApplicationsCount > 0,
 		},
 	];
 
@@ -172,7 +191,7 @@ function ManageDashboard() {
 						</Link>
 					</div>
 					<div className="bg-slate-800/50 border border-slate-700 rounded-xl overflow-hidden">
-						{opportunitiesData?.opportunities.slice(0, 5).map((opp, i) => (
+						{opportunities.slice(0, 5).map((opp, i) => (
 							<Link
 								key={opp.id}
 								to="/$tenantSlug/opportunities/$opportunityId"
@@ -201,7 +220,7 @@ function ManageDashboard() {
 								</span>
 							</Link>
 						))}
-						{(!opportunitiesData || opportunitiesData.opportunities.length === 0) && (
+						{opportunities.length === 0 && (
 							<div className="p-8 text-center text-gray-400">
 								No {t("opportunities").toLowerCase()} yet.{" "}
 								<Link

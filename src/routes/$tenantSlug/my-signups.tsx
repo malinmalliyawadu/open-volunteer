@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useUser } from "@clerk/clerk-react";
-import { orpc, client } from "@/orpc/client";
+import { client } from "@/orpc/client";
 import { useTenant } from "@/lib/tenant-context";
 import {
 	Calendar,
@@ -9,45 +9,75 @@ import {
 	Clock,
 	CheckCircle,
 	AlertCircle,
+	Loader2,
 } from "lucide-react";
+import { useState, useEffect } from "react";
 
 export const Route = createFileRoute("/$tenantSlug/my-signups")({
 	component: MySignups,
 });
 
+interface SignupData {
+	id: string;
+	status: string;
+	opportunity: {
+		id: string;
+		title: string;
+		startDate: Date;
+		endDate: Date | null;
+		location: string | null;
+		isVirtual: boolean;
+		tenantId: string;
+		tenant: { slug: string };
+	};
+}
+
 function MySignups() {
 	const { tenant, t, membership } = useTenant();
 	const { user: clerkUser, isSignedIn } = useUser();
 	const queryClient = useQueryClient();
+	const [dbUser, setDbUser] = useState<{ id: string } | null>(null);
+	const [signups, setSignups] = useState<SignupData[]>([]);
+	const [isLoading, setIsLoading] = useState(true);
 
-	// Load current user from our DB
-	const { data: dbUser } = useQuery({
-		...orpc.getUser.queryOptions({
-			input: { clerkId: clerkUser?.id ?? "" },
-		}),
-		enabled: isSignedIn && !!clerkUser?.id,
-	});
+	// Fetch user and signups client-side (Clerk auth only available on client)
+	useEffect(() => {
+		async function fetchData() {
+			if (!isSignedIn || !clerkUser?.id) {
+				setIsLoading(false);
+				return;
+			}
 
-	// Load signups
-	const { data, isLoading } = useQuery({
-		...orpc.getMySignups.queryOptions({
-			input: {
-				userId: dbUser?.id ?? "",
-				limit: 50,
-			},
-		}),
-		enabled: !!dbUser?.id,
-	});
+			setIsLoading(true);
+			try {
+				const user = await client.getUser({ clerkId: clerkUser.id });
+				if (user) {
+					setDbUser(user);
+					const data = await client.getMySignups({
+						userId: user.id,
+						limit: 50,
+					});
+					// Filter by tenant
+					const filtered = data.signups.filter(
+						(s) => s.opportunity.tenantId === tenant.id,
+					);
+					setSignups(filtered);
+				}
+			} catch (e) {
+				// User might not exist yet
+			}
+			setIsLoading(false);
+		}
 
-	// Filter by tenant
-	const signups =
-		data?.signups.filter((s) => s.opportunity.tenantId === tenant.id) ?? [];
+		fetchData();
+	}, [isSignedIn, clerkUser?.id, tenant.id]);
 
 	// Withdraw mutation
 	const withdrawMutation = useMutation({
 		mutationFn: (signupId: string) => client.withdrawApplication({ signupId }),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["getMySignups"] });
+		onSuccess: (_, signupId) => {
+			setSignups((prev) => prev.filter((s) => s.id !== signupId));
+			queryClient.invalidateQueries();
 		},
 	});
 
@@ -110,16 +140,8 @@ function MySignups() {
 				</h1>
 
 				{isLoading ? (
-					<div className="space-y-4">
-						{[...Array(3)].map((_, i) => (
-							<div
-								key={i}
-								className="bg-slate-800/50 rounded-xl p-6 animate-pulse"
-							>
-								<div className="h-6 bg-slate-700 rounded w-3/4 mb-4" />
-								<div className="h-4 bg-slate-700 rounded w-1/2" />
-							</div>
-						))}
+					<div className="flex justify-center py-16">
+						<Loader2 className="w-8 h-8 text-cyan-500 animate-spin" />
 					</div>
 				) : signups.length === 0 ? (
 					<div className="text-center py-16">
@@ -198,19 +220,7 @@ function MySignups() {
 }
 
 interface SignupCardProps {
-	signup: {
-		id: string;
-		status: string;
-		opportunity: {
-			id: string;
-			title: string;
-			startDate: Date;
-			endDate: Date | null;
-			location: string | null;
-			isVirtual: boolean;
-			tenant: { slug: string };
-		};
-	};
+	signup: SignupData;
 	onWithdraw?: () => void;
 	isWithdrawing?: boolean;
 	isPast?: boolean;

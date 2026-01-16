@@ -8,6 +8,7 @@ import {
 	createTerminologyHelper,
 	type TenantContextValue,
 } from "@/lib/tenant-context";
+import TenantHeader from "@/components/TenantHeader";
 
 export const Route = createFileRoute("/$tenantSlug")({
 	component: TenantLayout,
@@ -71,6 +72,7 @@ function TenantLayout() {
 	return (
 		<TenantContext.Provider value={contextValue}>
 			<TenantBranding tenant={tenant} />
+			<TenantHeader />
 			<Outlet />
 		</TenantContext.Provider>
 	);

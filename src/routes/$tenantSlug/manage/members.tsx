@@ -1,30 +1,77 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { orpc, client } from "@/orpc/client";
+import { createFileRoute, Link, useSearch, useNavigate } from "@tanstack/react-router";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { client } from "@/orpc/client";
+import { prisma } from "@/db";
 import { useTenant } from "@/lib/tenant-context";
 import { ArrowLeft, User, Shield, UserCog, Users, Search } from "lucide-react";
 import { useState } from "react";
+import { z } from "zod";
+
+const searchSchema = z.object({
+	role: z.enum(["ADMIN", "COORDINATOR", "VOLUNTEER"]).optional(),
+	search: z.string().optional(),
+});
 
 export const Route = createFileRoute("/$tenantSlug/manage/members")({
 	component: MembersPage,
+	validateSearch: searchSchema,
+	loaderDeps: ({ search }) => ({ search }),
+	loader: async ({ params, deps }) => {
+		const tenant = await prisma.tenant.findUnique({
+			where: { slug: params.tenantSlug },
+		});
+
+		if (!tenant) {
+			return { members: [], total: 0 };
+		}
+
+		const where: Parameters<typeof prisma.tenantMember.findMany>[0]["where"] = {
+			tenantId: tenant.id,
+		};
+
+		if (deps.search.role) {
+			where.role = deps.search.role;
+		}
+
+		if (deps.search.search) {
+			where.user = {
+				OR: [
+					{ name: { contains: deps.search.search, mode: "insensitive" } },
+					{ email: { contains: deps.search.search, mode: "insensitive" } },
+				],
+			};
+		}
+
+		const [members, total] = await Promise.all([
+			prisma.tenantMember.findMany({
+				where,
+				orderBy: { joinedAt: "desc" },
+				take: 50,
+				include: {
+					user: {
+						select: {
+							id: true,
+							name: true,
+							email: true,
+							avatarUrl: true,
+						},
+					},
+				},
+			}),
+			prisma.tenantMember.count({ where }),
+		]);
+
+		return { members, total };
+	},
 });
 
 function MembersPage() {
 	const { tenant, t, isAdmin } = useTenant();
+	const navigate = useNavigate();
+	const search = useSearch({ from: "/$tenantSlug/manage/members" });
+	const { members, total } = Route.useLoaderData();
 	const queryClient = useQueryClient();
-	const [search, setSearch] = useState("");
-	const [roleFilter, setRoleFilter] = useState<string | undefined>(undefined);
-
-	const { data, isLoading } = useQuery(
-		orpc.listMembers.queryOptions({
-			input: {
-				tenantId: tenant.id,
-				role: roleFilter as "ADMIN" | "COORDINATOR" | "VOLUNTEER" | undefined,
-				search: search || undefined,
-				limit: 50,
-			},
-		}),
-	);
+	const [searchInput, setSearchInput] = useState(search.search ?? "");
 
 	const updateMutation = useMutation({
 		mutationFn: ({
@@ -37,7 +84,8 @@ function MembersPage() {
 			status?: "ACTIVE" | "INACTIVE";
 		}) => client.updateMember({ memberId, role, status }),
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["listMembers"] });
+			queryClient.invalidateQueries();
+			window.location.reload();
 		},
 	});
 
@@ -66,6 +114,14 @@ function MembersPage() {
 		VOLUNTEER: "bg-gray-500/20 text-gray-400",
 	};
 
+	const handleSearch = () => {
+		navigate({
+			to: "/$tenantSlug/manage/members",
+			params: { tenantSlug: tenant.slug },
+			search: { ...search, search: searchInput || undefined },
+		});
+	};
+
 	return (
 		<div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900">
 			<div className="max-w-4xl mx-auto px-6 py-8">
@@ -80,7 +136,7 @@ function MembersPage() {
 
 				<div className="flex items-center justify-between mb-8">
 					<h1 className="text-3xl font-bold text-white">{t("volunteers")}</h1>
-					<span className="text-gray-400">{data?.total ?? 0} members</span>
+					<span className="text-gray-400">{total} members</span>
 				</div>
 
 				{/* Filters */}
@@ -90,67 +146,57 @@ function MembersPage() {
 						<input
 							type="text"
 							placeholder="Search by name or email..."
-							value={search}
-							onChange={(e) => setSearch(e.target.value)}
+							value={searchInput}
+							onChange={(e) => setSearchInput(e.target.value)}
+							onKeyDown={(e) => {
+								if (e.key === "Enter") {
+									handleSearch();
+								}
+							}}
 							className="w-full pl-10 pr-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-cyan-500"
 						/>
 					</div>
 					<div className="flex gap-2">
-						<button
-							type="button"
-							onClick={() => setRoleFilter(undefined)}
+						<Link
+							to="/$tenantSlug/manage/members"
+							params={{ tenantSlug: tenant.slug }}
+							search={{ search: search.search, role: undefined }}
 							className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-								!roleFilter
+								!search.role
 									? "bg-cyan-500 text-white"
 									: "bg-slate-800 text-gray-300 hover:bg-slate-700"
 							}`}
 						>
 							All
-						</button>
+						</Link>
 						{(["ADMIN", "COORDINATOR", "VOLUNTEER"] as const).map((role) => (
-							<button
+							<Link
 								key={role}
-								type="button"
-								onClick={() => setRoleFilter(role)}
+								to="/$tenantSlug/manage/members"
+								params={{ tenantSlug: tenant.slug }}
+								search={{ search: search.search, role }}
 								className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${
-									roleFilter === role
+									search.role === role
 										? "bg-cyan-500 text-white"
 										: "bg-slate-800 text-gray-300 hover:bg-slate-700"
 								}`}
 							>
 								{roleIcons[role]}
 								{role.charAt(0) + role.slice(1).toLowerCase()}
-							</button>
+							</Link>
 						))}
 					</div>
 				</div>
 
 				{/* Members List */}
-				{isLoading ? (
-					<div className="space-y-4">
-						{[...Array(5)].map((_, i) => (
-							<div
-								key={i}
-								className="bg-slate-800/50 rounded-xl p-4 animate-pulse"
-							>
-								<div className="flex items-center gap-4">
-									<div className="w-10 h-10 rounded-full bg-slate-700" />
-									<div className="flex-1">
-										<div className="h-5 bg-slate-700 rounded w-1/3 mb-2" />
-										<div className="h-4 bg-slate-700 rounded w-1/4" />
-									</div>
-								</div>
-							</div>
-						))}
-					</div>
-				) : data?.members.length === 0 ? (
+				{members.length === 0 ? (
 					<div className="text-center py-16 bg-slate-800/50 border border-slate-700 rounded-xl">
 						<Users className="w-12 h-12 text-gray-500 mx-auto mb-4" />
 						<p className="text-gray-400 text-lg">No members found.</p>
 					</div>
 				) : (
 					<div className="bg-slate-800/50 border border-slate-700 rounded-xl overflow-hidden">
-						{data?.members.map((member, i) => (
+						{members.map((member, i) => (
 							<div
 								key={member.id}
 								className={`flex items-center justify-between p-4 ${

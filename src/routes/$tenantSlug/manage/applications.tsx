@@ -1,6 +1,7 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { orpc, client } from "@/orpc/client";
+import { createFileRoute, Link, useSearch } from "@tanstack/react-router";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { client } from "@/orpc/client";
+import { prisma } from "@/db";
 import { useTenant } from "@/lib/tenant-context";
 import {
 	CheckCircle,
@@ -10,46 +11,64 @@ import {
 	User,
 	Calendar,
 } from "lucide-react";
-import { useState } from "react";
+import { z } from "zod";
+
+const searchSchema = z.object({
+	status: z.enum(["APPLIED", "APPROVED", "all"]).default("APPLIED"),
+});
 
 export const Route = createFileRoute("/$tenantSlug/manage/applications")({
 	component: ApplicationsPage,
+	validateSearch: searchSchema,
+	loaderDeps: ({ search }) => ({ search }),
+	loader: async ({ params, deps }) => {
+		const tenant = await prisma.tenant.findUnique({
+			where: { slug: params.tenantSlug },
+		});
+
+		if (!tenant) {
+			return { applications: [] };
+		}
+
+		const statusFilter = deps.search.status === "all" ? undefined : deps.search.status;
+
+		const applications = await prisma.opportunitySignup.findMany({
+			where: {
+				...(statusFilter ? { status: statusFilter } : {}),
+				opportunity: {
+					tenantId: tenant.id,
+				},
+			},
+			orderBy: { appliedAt: "desc" },
+			take: 100,
+			include: {
+				user: {
+					select: {
+						id: true,
+						name: true,
+						email: true,
+						avatarUrl: true,
+					},
+				},
+				opportunity: {
+					select: {
+						id: true,
+						title: true,
+						startDate: true,
+					},
+				},
+			},
+		});
+
+		return { applications };
+	},
 });
 
 function ApplicationsPage() {
 	const { tenant, isCoordinator } = useTenant();
+	const search = useSearch({ from: "/$tenantSlug/manage/applications" });
+	const { applications } = Route.useLoaderData();
 	const queryClient = useQueryClient();
-	const [filter, setFilter] = useState<"APPLIED" | "APPROVED" | "all">("APPLIED");
-
-	// Get all opportunities for this tenant
-	const { data: opportunitiesData } = useQuery(
-		orpc.listOpportunities.queryOptions({
-			input: {
-				tenantId: tenant.id,
-				limit: 100,
-			},
-		}),
-	);
-
-	const opportunityIds =
-		opportunitiesData?.opportunities.map((o) => o.id) ?? [];
-
-	// Get applications - we'll filter client-side
-	const { data: applicationsData, isLoading } = useQuery({
-		...orpc.listSignups.queryOptions({
-			input: {
-				status: filter === "all" ? undefined : filter,
-				limit: 100,
-			},
-		}),
-		enabled: opportunityIds.length > 0,
-	});
-
-	// Filter to only this tenant's opportunities
-	const applications =
-		applicationsData?.signups.filter((s) =>
-			opportunityIds.includes(s.opportunityId),
-		) ?? [];
 
 	// Update signup mutation
 	const updateMutation = useMutation({
@@ -61,7 +80,9 @@ function ApplicationsPage() {
 			status: "APPROVED" | "DECLINED" | "WAITLISTED";
 		}) => client.updateSignup({ signupId, status }),
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["listSignups"] });
+			queryClient.invalidateQueries();
+			// Force reload to refresh loader data
+			window.location.reload();
 		},
 	});
 
@@ -94,35 +115,24 @@ function ApplicationsPage() {
 					<h1 className="text-3xl font-bold text-white">Applications</h1>
 					<div className="flex gap-2">
 						{(["APPLIED", "APPROVED", "all"] as const).map((f) => (
-							<button
+							<Link
 								key={f}
-								type="button"
-								onClick={() => setFilter(f)}
+								to="/$tenantSlug/manage/applications"
+								params={{ tenantSlug: tenant.slug }}
+								search={{ status: f }}
 								className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-									filter === f
+									search.status === f
 										? "bg-cyan-500 text-white"
 										: "bg-slate-800 text-gray-300 hover:bg-slate-700"
 								}`}
 							>
 								{f === "all" ? "All" : f.charAt(0) + f.slice(1).toLowerCase()}
-							</button>
+							</Link>
 						))}
 					</div>
 				</div>
 
-				{isLoading ? (
-					<div className="space-y-4">
-						{[...Array(3)].map((_, i) => (
-							<div
-								key={i}
-								className="bg-slate-800/50 rounded-xl p-6 animate-pulse"
-							>
-								<div className="h-6 bg-slate-700 rounded w-3/4 mb-4" />
-								<div className="h-4 bg-slate-700 rounded w-1/2" />
-							</div>
-						))}
-					</div>
-				) : applications.length === 0 ? (
+				{applications.length === 0 ? (
 					<div className="text-center py-16 bg-slate-800/50 border border-slate-700 rounded-xl">
 						<Clock className="w-12 h-12 text-gray-500 mx-auto mb-4" />
 						<p className="text-gray-400 text-lg">No applications to review.</p>
@@ -167,13 +177,13 @@ interface ApplicationCardProps {
 		status: string;
 		appliedAt: Date;
 		notes: string | null;
-		user?: {
+		user: {
 			id: string;
 			name: string | null;
 			email: string;
 			avatarUrl: string | null;
 		} | null;
-		opportunity?: {
+		opportunity: {
 			id: string;
 			title: string;
 			startDate: Date;
