@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useSearch, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { client } from "@/orpc/client";
-import { prisma } from "@/db";
+import { getMembersData } from "@/server/loaders";
 import { useTenant } from "@/lib/tenant-context";
 import { ArrowLeft, User, Shield, UserCog, Users, Search } from "lucide-react";
 import { useState } from "react";
@@ -17,51 +17,13 @@ export const Route = createFileRoute("/$tenantSlug/manage/members")({
 	validateSearch: searchSchema,
 	loaderDeps: ({ search }) => ({ search }),
 	loader: async ({ params, deps }) => {
-		const tenant = await prisma.tenant.findUnique({
-			where: { slug: params.tenantSlug },
+		return await getMembersData({
+			data: {
+				tenantSlug: params.tenantSlug,
+				role: deps.search.role,
+				search: deps.search.search,
+			},
 		});
-
-		if (!tenant) {
-			return { members: [], total: 0 };
-		}
-
-		const where: Parameters<typeof prisma.tenantMember.findMany>[0]["where"] = {
-			tenantId: tenant.id,
-		};
-
-		if (deps.search.role) {
-			where.role = deps.search.role;
-		}
-
-		if (deps.search.search) {
-			where.user = {
-				OR: [
-					{ name: { contains: deps.search.search, mode: "insensitive" } },
-					{ email: { contains: deps.search.search, mode: "insensitive" } },
-				],
-			};
-		}
-
-		const [members, total] = await Promise.all([
-			prisma.tenantMember.findMany({
-				where,
-				orderBy: { joinedAt: "desc" },
-				take: 50,
-				include: {
-					user: {
-						select: {
-							id: true,
-							name: true,
-							email: true,
-							avatarUrl: true,
-						},
-					},
-				},
-			}),
-			prisma.tenantMember.count({ where }),
-		]);
-
-		return { members, total };
 	},
 });
 

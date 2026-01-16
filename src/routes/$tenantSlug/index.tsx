@@ -1,50 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useTenant } from "@/lib/tenant-context";
-import { prisma } from "@/db";
+import { getTenantHomeData } from "@/server/loaders";
 import { Calendar, MapPin, Users, Clock } from "lucide-react";
 
 export const Route = createFileRoute("/$tenantSlug/")({
 	component: TenantHome,
 	loader: async ({ params }) => {
-		const tenant = await prisma.tenant.findUnique({
-			where: { slug: params.tenantSlug },
-		});
-
-		if (!tenant) {
-			return { opportunities: [], hasMore: false };
-		}
-
-		const opportunities = await prisma.opportunity.findMany({
-			where: {
-				tenantId: tenant.id,
-				status: "PUBLISHED",
-			},
-			orderBy: { startDate: "asc" },
-			take: 12,
-			include: {
-				_count: {
-					select: {
-						signups: {
-							where: {
-								status: { in: ["APPLIED", "APPROVED"] },
-							},
-						},
-					},
-				},
-			},
-		});
-
-		const total = await prisma.opportunity.count({
-			where: {
-				tenantId: tenant.id,
-				status: "PUBLISHED",
-			},
-		});
-
-		return {
-			opportunities,
-			hasMore: total > 12,
-		};
+		return await getTenantHomeData({ data: params.tenantSlug });
 	},
 });
 

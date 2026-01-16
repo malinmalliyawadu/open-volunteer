@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useSearch } from "@tanstack/react-router";
 import { useTenant } from "@/lib/tenant-context";
-import { prisma } from "@/db";
+import { getOpportunitiesByTenant } from "@/server/loaders";
 import { Calendar, MapPin, Search } from "lucide-react";
 import { useState } from "react";
 import { z } from "zod";
@@ -16,55 +16,14 @@ export const Route = createFileRoute("/$tenantSlug/opportunities/")({
 	validateSearch: searchSchema,
 	loaderDeps: ({ search }) => ({ search }),
 	loader: async ({ params, deps }) => {
-		const tenant = await prisma.tenant.findUnique({
-			where: { slug: params.tenantSlug },
+		return await getOpportunitiesByTenant({
+			data: {
+				tenantSlug: params.tenantSlug,
+				type: deps.search.type,
+				search: deps.search.search,
+				page: deps.search.page,
+			},
 		});
-
-		if (!tenant) {
-			return { opportunities: [], total: 0 };
-		}
-
-		const limit = 12;
-		const offset = ((deps.search.page ?? 1) - 1) * limit;
-
-		const where: Parameters<typeof prisma.opportunity.findMany>[0]["where"] = {
-			tenantId: tenant.id,
-			status: "PUBLISHED",
-		};
-
-		if (deps.search.type) {
-			where.type = deps.search.type;
-		}
-
-		if (deps.search.search) {
-			where.OR = [
-				{ title: { contains: deps.search.search, mode: "insensitive" } },
-				{ description: { contains: deps.search.search, mode: "insensitive" } },
-			];
-		}
-
-		const [opportunities, total] = await Promise.all([
-			prisma.opportunity.findMany({
-				where,
-				orderBy: { startDate: "asc" },
-				take: limit,
-				skip: offset,
-				include: {
-					_count: {
-						select: {
-							signups: {
-								where: {
-									status: { in: ["APPLIED", "APPROVED"] },
-								},
-							},
-						},
-					},
-				},
-			}),
-			prisma.opportunity.count({ where }),
-		]);
-
-		return { opportunities, total };
 	},
 });
 

@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useUser } from "@clerk/clerk-react";
 import { client } from "@/orpc/client";
 import { useTenant } from "@/lib/tenant-context";
-import { prisma } from "@/db";
+import { getOpportunityById } from "@/server/loaders";
 import {
 	Calendar,
 	MapPin,
@@ -21,22 +21,7 @@ export const Route = createFileRoute(
 )({
 	component: OpportunityDetail,
 	loader: async ({ params }) => {
-		const opportunity = await prisma.opportunity.findUnique({
-			where: { id: params.opportunityId },
-			include: {
-				tenant: true,
-				_count: {
-					select: {
-						signups: {
-							where: {
-								status: { in: ["APPLIED", "APPROVED"] },
-							},
-						},
-					},
-				},
-			},
-		});
-
+		const opportunity = await getOpportunityById({ data: params.opportunityId });
 		return { opportunity };
 	},
 });

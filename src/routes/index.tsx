@@ -1,13 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Users, ArrowRight } from "lucide-react";
-import { prisma } from "@/db";
+import { getAllTenants } from "@/server/loaders";
 
 export const Route = createFileRoute("/")({
 	component: LandingPage,
 	loader: async () => {
-		const tenants = await prisma.tenant.findMany({
-			orderBy: { name: "asc" },
-		});
+		const tenants = await getAllTenants();
 		return { tenants };
 	},
 });

@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useSearch } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { client } from "@/orpc/client";
-import { prisma } from "@/db";
+import { getApplicationsData } from "@/server/loaders";
 import { useTenant } from "@/lib/tenant-context";
 import {
 	CheckCircle,
@@ -22,45 +22,12 @@ export const Route = createFileRoute("/$tenantSlug/manage/applications")({
 	validateSearch: searchSchema,
 	loaderDeps: ({ search }) => ({ search }),
 	loader: async ({ params, deps }) => {
-		const tenant = await prisma.tenant.findUnique({
-			where: { slug: params.tenantSlug },
-		});
-
-		if (!tenant) {
-			return { applications: [] };
-		}
-
-		const statusFilter = deps.search.status === "all" ? undefined : deps.search.status;
-
-		const applications = await prisma.opportunitySignup.findMany({
-			where: {
-				...(statusFilter ? { status: statusFilter } : {}),
-				opportunity: {
-					tenantId: tenant.id,
-				},
-			},
-			orderBy: { appliedAt: "desc" },
-			take: 100,
-			include: {
-				user: {
-					select: {
-						id: true,
-						name: true,
-						email: true,
-						avatarUrl: true,
-					},
-				},
-				opportunity: {
-					select: {
-						id: true,
-						title: true,
-						startDate: true,
-					},
-				},
+		return await getApplicationsData({
+			data: {
+				tenantSlug: params.tenantSlug,
+				status: deps.search.status,
 			},
 		});
-
-		return { applications };
 	},
 });
 

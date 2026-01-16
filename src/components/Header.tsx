@@ -1,10 +1,11 @@
 import { Link, useParams, useMatchRoute } from "@tanstack/react-router";
 import {
 	SignedIn,
-	SignInButton,
 	SignedOut,
+	SignInButton,
 	UserButton,
 } from "@clerk/clerk-react";
+import { ClientOnly } from "@/components/ClientOnly";
 
 export default function Header() {
 	const params = useParams({ strict: false });
@@ -26,25 +27,31 @@ export default function Header() {
 					</Link>
 
 					<div className="flex items-center gap-4">
-						<SignedOut>
-							<SignInButton mode="modal">
-								<button
-									type="button"
-									className="px-4 py-2 text-sm font-medium text-white bg-cyan-500 hover:bg-cyan-600 rounded-lg transition-colors"
-								>
-									Sign In
-								</button>
-							</SignInButton>
-						</SignedOut>
-						<SignedIn>
-							<UserButton
-								appearance={{
-									elements: {
-										avatarBox: "w-9 h-9",
-									},
-								}}
-							/>
-						</SignedIn>
+						<ClientOnly
+							fallback={
+								<div className="w-20 h-9 bg-slate-800 rounded-lg animate-pulse" />
+							}
+						>
+							<SignedOut>
+								<SignInButton mode="modal">
+									<button
+										type="button"
+										className="px-4 py-2 text-sm font-medium text-white bg-cyan-500 hover:bg-cyan-600 rounded-lg transition-colors"
+									>
+										Sign In
+									</button>
+								</SignInButton>
+							</SignedOut>
+							<SignedIn>
+								<UserButton
+									appearance={{
+										elements: {
+											avatarBox: "w-9 h-9",
+										},
+									}}
+								/>
+							</SignedIn>
+						</ClientOnly>
 					</div>
 				</div>
 			</div>

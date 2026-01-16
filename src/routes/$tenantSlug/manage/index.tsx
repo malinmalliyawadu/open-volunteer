@@ -1,61 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useTenant } from "@/lib/tenant-context";
-import { prisma } from "@/db";
+import { getManageDashboardData } from "@/server/loaders";
 import { Users, Calendar, ClipboardList, Settings } from "lucide-react";
 
 export const Route = createFileRoute("/$tenantSlug/manage/")({
 	component: ManageDashboard,
 	loader: async ({ params }) => {
-		const tenant = await prisma.tenant.findUnique({
-			where: { slug: params.tenantSlug },
-		});
-
-		if (!tenant) {
-			return {
-				opportunities: [],
-				membersTotal: 0,
-				pendingApplicationsCount: 0,
-			};
-		}
-
-		const [opportunities, membersTotal, pendingApplications] = await Promise.all([
-			prisma.opportunity.findMany({
-				where: { tenantId: tenant.id },
-				orderBy: { createdAt: "desc" },
-				take: 100,
-				include: {
-					_count: {
-						select: {
-							signups: {
-								where: {
-									status: { in: ["APPLIED", "APPROVED"] },
-								},
-							},
-						},
-					},
-				},
-			}),
-			prisma.tenantMember.count({
-				where: {
-					tenantId: tenant.id,
-					status: "ACTIVE",
-				},
-			}),
-			prisma.opportunitySignup.count({
-				where: {
-					status: "APPLIED",
-					opportunity: {
-						tenantId: tenant.id,
-					},
-				},
-			}),
-		]);
-
-		return {
-			opportunities,
-			membersTotal,
-			pendingApplicationsCount: pendingApplications,
-		};
+		return await getManageDashboardData({ data: params.tenantSlug });
 	},
 });
 

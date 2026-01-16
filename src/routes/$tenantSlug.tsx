@@ -2,7 +2,7 @@ import { createFileRoute, Outlet } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useUser } from "@clerk/clerk-react";
 import { orpc } from "@/orpc/client";
-import { prisma } from "@/db";
+import { getTenantBySlug } from "@/server/loaders";
 import {
 	TenantContext,
 	createTerminologyHelper,
@@ -13,9 +13,7 @@ import TenantHeader from "@/components/TenantHeader";
 export const Route = createFileRoute("/$tenantSlug")({
 	component: TenantLayout,
 	loader: async ({ params }) => {
-		const tenant = await prisma.tenant.findUnique({
-			where: { slug: params.tenantSlug },
-		});
+		const tenant = await getTenantBySlug({ data: params.tenantSlug });
 		return { tenant };
 	},
 });
